@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-from bs4 import BeautifulSoup
 import spacy
 import textacy.preprocessing as tp
 import numpy as np
@@ -9,21 +8,24 @@ import fasttext
 import pandas as pd
 from sklearn.utils import shuffle
 import random
+import json
 
 
 class Corpus(object):
 
     """
         Class for data preprocessing (8000 Amazon review pairs)
+        Modified to process my patient data
     """
 
-    def __init__(self, test_split=0.2, T_w=20, D_w=300, vocab_size_token=15000, vocab_size_chr=125):
+    # def __init__(self, test_split=0.2, T_w=20, D_w=300, vocab_size_token=15000, vocab_size_chr=125):
+    def __init__(self, T_w=20, D_w=300, vocab_size_token=15000, vocab_size_chr=125):
 
         # define Spacy tokenizer
         self.tokenizer = spacy.load('en_core_web_lg')
         
         # load raw data
-        self.data_panda = pd.read_csv('{}'.format(os.path.join('data', 'amazon.csv')), sep='\t')
+        # self.data_panda = pd.read_csv('{}'.format(os.path.join('data', 'amazon.csv')), sep='\t')
 
         # load pre-trained fastText word embedding model
         self.WE_dic = fasttext.load_model(os.path.join('data', 'cc.en.300.bin'))
@@ -34,12 +36,12 @@ class Corpus(object):
         self.T_w = T_w
 
         # split size of test set
-        self.test_split = test_split
+        # self.test_split = test_split
 
         # train set
-        self.docs_L_tr = []
-        self.docs_R_tr = []
-        self.labels_tr = []
+        self.docs_L_tr = [] # left document?
+        self.docs_R_tr = [] # right document?
+        self.labels_tr = [] # same author or not?
 
         # test set
         self.docs_L_te = []
@@ -73,51 +75,118 @@ class Corpus(object):
 
         # word embedding matrix
         self.E_w = None
+
+        #unique list to keep track of documents for vocabulary generation
+        self.seen_sessions = set()
+        self.sessions_cache = dict()
     
     # extract docs
     def extract_docs(self):
+        with open(r"/home/iyuzu/master_thesis/data/train_pairs_v2.1.json", "r", encoding="UTF-8") as f:
+            train_pairs = json.load(f)
+        with open(r"/home/iyuzu/master_thesis/data/test_pairs.json", "r", encoding="UTF-8") as f:
+            test_pairs = json.load(f)
 
-        for idx in tqdm(range(self.data_panda.review.shape[0]), desc='preprocess docs'):
+        # -------------------
+        # 1) TEST SET
+        # -------------------
+        for idx in tqdm(range(len(test_pairs)), desc="preprocess TEST docs"):
+            p = test_pairs[idx]
 
-            temp = self.data_panda.review[idx].split('$$$')
+            doc_1_id = p["l_session"]["id"]
+            doc_2_id = p["r_session"]["id"]
 
-            if random.uniform(0, 1) < 0.5:
-                doc_1 = BeautifulSoup(temp[0], 'html.parser').get_text().encode('utf-8').decode('utf-8')
-                doc_2 = BeautifulSoup(temp[1], 'html.parser').get_text().encode('utf-8').decode('utf-8')
+            if doc_1_id in self.sessions_cache.keys():
+                # if it has been processed before, take a copy of the value element 
+                doc_1 = self.sessions_cache[doc_1_id].copy()
+           
             else:
-                doc_2 = BeautifulSoup(temp[0], 'html.parser').get_text().encode('utf-8').decode('utf-8')
-                doc_1 = BeautifulSoup(temp[1], 'html.parser').get_text().encode('utf-8').decode('utf-8')
+                doc_1 = " ".join(p["l_session"]["messages"]) #doc on left sid
 
-            # preprocessing and tokenizing
-            doc_1 = self.preprocess_doc(doc_1)
-            doc_2 = self.preprocess_doc(doc_2)
+                # preprocessing and tokenizing
+                doc_1 = self.preprocess_doc(doc_1)
 
-            r = random.uniform(0, 1)
+                # add special tokens
+                doc_1 = self.add_special_tokens_doc(doc_1)
 
-            if r > self.test_split:
+                self.sessions_cache[doc_1_id] = doc_1
+
+            # same again for document 2
+            if doc_2_id in self.sessions_cache.keys():
+                # if it has been processed before, take a copy of the value element 
+                doc_2 = self.sessions_cache[doc_2_id].copy()
+           
+            else:
+                doc_2 = " ".join(p["r_session"]["messages"]) #doc on left side
+
+                # preprocessing and tokenizing
+                doc_2 = self.preprocess_doc(doc_2)
+
+                # add special tokens
+                doc_2 = self.add_special_tokens_doc(doc_2)
+
+                self.sessions_cache[doc_2_id] = doc_2
+
+            label = p["label"]
+
+            # add doc-pair to TEST set
+            self.docs_L_te.append(doc_1)
+            self.docs_R_te.append(doc_2)
+            self.labels_te.append(label)
+
+        # -------------------
+        # 2) TRAIN SET
+        # -------------------
+
+        for idx in tqdm(range(len(train_pairs)), desc='preprocess docs'):
+            p = train_pairs[idx]
+
+            # check, if the ids of the documents has been processed before 
+            # and are stored in session_cache
+            doc_1_id = p["l_session"]["id"]
+            doc_2_id = p["r_session"]["id"]
+
+            if doc_1_id in self.sessions_cache.keys():
+                # if it has been processed before, take a copy of the value element 
+                doc_1 = self.sessions_cache[doc_1_id].copy()
+           
+            else:
+                doc_1 = " ".join(p["l_session"]["messages"]) #doc on left side
+
+                # preprocessing and tokenizing
+                doc_1 = self.preprocess_doc(doc_1)
+
                 # count tokens/characters in train set
-                self.count_tokens_and_characters(doc_1)
-                self.count_tokens_and_characters(doc_2)
+                self.count_tokens_and_characters_by_session(p["l_session"]["id"], doc_1)
 
-            # add special tokens
-            doc_1 = self.add_special_tokens_doc(doc_1)
-            doc_2 = self.add_special_tokens_doc(doc_2)
+                # add special tokens
+                doc_1 = self.add_special_tokens_doc(doc_1)
 
-            if r > self.test_split:
-                # add doc-pair to train set
-                self.docs_L_tr.append(doc_1)
-                self.docs_R_tr.append(doc_2)
-                self.labels_tr.append(self.data_panda.sentiment[idx])
+                self.sessions_cache[doc_1_id] = doc_1
 
+            # same again for document 2
+            if doc_2_id in self.sessions_cache.keys():
+                # if it has been processed before, take a copy of the value element 
+                doc_2 = self.sessions_cache[doc_2_id].copy()
+           
             else:
-                # ad doc-pair to test set
-                self.docs_L_te.append(doc_1)
-                self.docs_R_te.append(doc_2)
-                self.labels_te.append(self.data_panda.sentiment[idx])
-            
-        # shuffle
-        self.docs_L_tr, self.docs_R_tr, self.labels_tr = shuffle(self.docs_L_tr, self.docs_R_tr, self.labels_tr)
-        self.docs_L_te, self.docs_R_te, self.labels_te = shuffle(self.docs_L_te, self.docs_R_te, self.labels_te)
+                doc_2 = " ".join(p["r_session"]["messages"]) #doc on left side
+
+                # preprocessing and tokenizing
+                doc_2 = self.preprocess_doc(doc_2)
+
+                # count tokens/characters in train set
+                self.count_tokens_and_characters_by_session(p["r_session"]["id"], doc_2)
+
+                # add special tokens
+                doc_2 = self.add_special_tokens_doc(doc_2)
+
+                self.sessions_cache[doc_2_id] = doc_2
+
+            # add doc-pair to train set
+            self.docs_L_tr.append(doc_1)
+            self.docs_R_tr.append(doc_2)
+            self.labels_tr.append(p["label"])
 
     # pre-process single document
     def preprocess_doc(self, doc):
@@ -172,6 +241,15 @@ class Corpus(object):
                     sent = ['<SLB>'] + sent[self.T_w - 1:]
 
         return doc_new
+    
+    # check if session's vocab was counted already
+    def count_tokens_and_characters_by_session(self, session_id, doc):
+        # wenn das Dokument bereits processed wurde, müssen nicht erneut die 
+        # Tokens und Characters gezählt werden
+        if session_id in self.seen_sessions:
+            return
+        self.seen_sessions.add(session_id)
+        self.count_tokens_and_characters(doc)
 
     def count_tokens_and_characters(self, doc):
         for sent in doc:
