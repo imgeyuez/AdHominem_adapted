@@ -48,6 +48,17 @@ class Corpus(object):
         self.docs_R_te = []
         self.labels_te = []
 
+        # DEV set
+        self.docs_L_dev = []
+        self.docs_R_dev = []
+        self.labels_dev = []
+
+        # Pair IDs
+        self.pair_ids_tr = []
+        self.pair_ids_dev = []
+        self.pair_ids_te = []
+
+
         # vocabulary sizes
         self.vocab_size_token = vocab_size_token
         self.vocab_size_chr = vocab_size_chr
@@ -82,13 +93,87 @@ class Corpus(object):
     
     # extract docs
     def extract_docs(self):
-        with open(r"/home/iyuzu/master_thesis/data/train_pairs_v2.1.json", "r", encoding="UTF-8") as f:
+        # VERANDA 
+        with open(r"/home/iyuzu/master_thesis/data/train_av_datapairs_2026-09-09_15-03-38.json.json", "r", encoding="UTF-8") as f:
+        # with open(r"/home/iyuzu/master_thesis/data_PAN/converted/train_final_pairs_2026-09-09_17-45-05.json", "r", encoding="UTF-8") as f:
             train_pairs = json.load(f)
-        with open(r"/home/iyuzu/master_thesis/data/test_pairs.json", "r", encoding="UTF-8") as f:
+        # VERANDA 
+        with open(r"/home/iyuzu/master_thesis/data/dev_av_datapairs_2026-09-09_15-03-38.json.json", "r", encoding="UTF-8") as f:
+        # with open(r"/home/iyuzu/master_thesis/data_PAN/converted/dev_final_pairs_2026-09-09_17-45-05.json", "r", encoding="UTF-8") as f:
+            dev_pairs = json.load(f)
+
+        # train_pairs = train_pairs + dev_pairs
+
+        # VERANDA 
+        with open(r"/home/iyuzu/master_thesis/data/test_av_datapairs_2026-09-09_15-03-38.json.json", "r", encoding="UTF-8") as f:
+        # PAN 
+        # with open(r"/home/iyuzu/master_thesis/data_PAN/converted/test_pairs_2026-09-09_17-45-05.json", "r", encoding="UTF-8") as f:
             test_pairs = json.load(f)
 
         # -------------------
-        # 1) TEST SET
+        # 2) TRAIN SET
+        # -------------------
+
+        # for idx in tqdm(range(len(train_pairs)), desc='preprocess docs'):
+        for split_name, pairs, docs_L, docs_R, labels, pair_ids in [
+            ("TRAIN", train_pairs, self.docs_L_tr, self.docs_R_tr,
+            self.labels_tr, self.pair_ids_tr),
+
+            ("DEV", dev_pairs, self.docs_L_dev, self.docs_R_dev,
+            self.labels_dev, self.pair_ids_dev),
+        ]:
+
+            for p in tqdm(pairs, desc=f"preprocess {split_name} docs"):
+
+            # p = train_pairs[idx]
+
+                # check, if the ids of the documents has been processed before 
+                # and are stored in session_cache
+                doc_1_id = p["l_session"]["id"]
+                doc_2_id = p["r_session"]["id"]
+
+                if doc_1_id in self.sessions_cache.keys():
+                    # if it has been processed before, take a copy of the value element 
+                    doc_1 = self.sessions_cache[doc_1_id].copy()
+           
+                else:
+                    doc_1 = " ".join(p["l_session"]["messages"])
+                    doc_1 = self.preprocess_doc(doc_1)
+
+                    if split_name == "TRAIN":
+                        self.count_tokens_and_characters_by_session(doc_1_id, doc_1)
+
+                    doc_1 = self.add_special_tokens_doc(doc_1)
+                    self.sessions_cache[doc_1_id] = doc_1
+
+                # same again for document 2
+                if doc_2_id in self.sessions_cache.keys():
+                    # if it has been processed before, take a copy of the value element 
+                    doc_2 = self.sessions_cache[doc_2_id].copy()
+           
+                else:
+                    doc_2 = " ".join(p["r_session"]["messages"]) #doc on left side
+
+                    # preprocessing and tokenizing
+                    doc_2 = self.preprocess_doc(doc_2)
+
+                    if split_name == "TRAIN":
+                        # count tokens/characters in train set
+                        self.count_tokens_and_characters_by_session(doc_2_id, doc_2)
+
+                    # add special tokens
+                    doc_2 = self.add_special_tokens_doc(doc_2)
+
+                    self.sessions_cache[doc_2_id] = doc_2
+
+                # add doc-pair to data set
+                docs_L.append(doc_1)
+                docs_R.append(doc_2)
+                labels.append(p["label"])
+                pair_ids.append(p["pair_id"])
+
+        # -------------------
+        # TEST SET
         # -------------------
         for idx in tqdm(range(len(test_pairs)), desc="preprocess TEST docs"):
             p = test_pairs[idx]
@@ -99,7 +184,7 @@ class Corpus(object):
             if doc_1_id in self.sessions_cache.keys():
                 # if it has been processed before, take a copy of the value element 
                 doc_1 = self.sessions_cache[doc_1_id].copy()
-           
+            
             else:
                 doc_1 = " ".join(p["l_session"]["messages"]) #doc on left sid
 
@@ -115,7 +200,7 @@ class Corpus(object):
             if doc_2_id in self.sessions_cache.keys():
                 # if it has been processed before, take a copy of the value element 
                 doc_2 = self.sessions_cache[doc_2_id].copy()
-           
+            
             else:
                 doc_2 = " ".join(p["r_session"]["messages"]) #doc on left side
 
@@ -133,60 +218,7 @@ class Corpus(object):
             self.docs_L_te.append(doc_1)
             self.docs_R_te.append(doc_2)
             self.labels_te.append(label)
-
-        # -------------------
-        # 2) TRAIN SET
-        # -------------------
-
-        for idx in tqdm(range(len(train_pairs)), desc='preprocess docs'):
-            p = train_pairs[idx]
-
-            # check, if the ids of the documents has been processed before 
-            # and are stored in session_cache
-            doc_1_id = p["l_session"]["id"]
-            doc_2_id = p["r_session"]["id"]
-
-            if doc_1_id in self.sessions_cache.keys():
-                # if it has been processed before, take a copy of the value element 
-                doc_1 = self.sessions_cache[doc_1_id].copy()
-           
-            else:
-                doc_1 = " ".join(p["l_session"]["messages"]) #doc on left side
-
-                # preprocessing and tokenizing
-                doc_1 = self.preprocess_doc(doc_1)
-
-                # count tokens/characters in train set
-                self.count_tokens_and_characters_by_session(p["l_session"]["id"], doc_1)
-
-                # add special tokens
-                doc_1 = self.add_special_tokens_doc(doc_1)
-
-                self.sessions_cache[doc_1_id] = doc_1
-
-            # same again for document 2
-            if doc_2_id in self.sessions_cache.keys():
-                # if it has been processed before, take a copy of the value element 
-                doc_2 = self.sessions_cache[doc_2_id].copy()
-           
-            else:
-                doc_2 = " ".join(p["r_session"]["messages"]) #doc on left side
-
-                # preprocessing and tokenizing
-                doc_2 = self.preprocess_doc(doc_2)
-
-                # count tokens/characters in train set
-                self.count_tokens_and_characters_by_session(p["r_session"]["id"], doc_2)
-
-                # add special tokens
-                doc_2 = self.add_special_tokens_doc(doc_2)
-
-                self.sessions_cache[doc_2_id] = doc_2
-
-            # add doc-pair to train set
-            self.docs_L_tr.append(doc_1)
-            self.docs_R_tr.append(doc_2)
-            self.labels_tr.append(p["label"])
+            self.pair_ids_te.append(p["pair_id"])
 
     # pre-process single document
     def preprocess_doc(self, doc):
