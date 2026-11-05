@@ -5,6 +5,7 @@ import numpy as np
 from math import ceil
 from sklearn.utils import shuffle
 from evaluate import evaluate_all
+import os
 
 
 class AdHominem():
@@ -947,6 +948,15 @@ class AdHominem():
 
         return step, loss, TP, FP, TN, FN
 
+    def save_model(self, checkpoint_path):
+        """Save the current TensorFlow model."""
+        import os
+
+        os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
+        saver = tf.train.Saver()
+        saver.save(self.sess, checkpoint_path)
+        print(f"Model saved: {checkpoint_path}")
+
     ################
     # evaluate model
     ################
@@ -1128,18 +1138,18 @@ class AdHominem():
     #################
     # train AdHominem
     #################
-    def train_model(self, train_set, test_set, file_results):
+    def train_model(self, train_set, dev_set, file_results, checkpoint_dir):
 
         # total number of epochs
         epochs = self.hyper_parameters['epochs']
 
-        # number of batches for dev/test set
+        # number of batches for dev set
         batch_size_tr = self.hyper_parameters['batch_size_tr']
-        batch_size_te = self.hyper_parameters['batch_size_te']
+        batch_size_dev = self.hyper_parameters['batch_size_dev']
 
-        # extract train, test sets
+        # extract train, dev sets
         docs_L_tr, docs_R_tr, labels_tr = train_set
-        docs_L_te, docs_R_te, labels_te = test_set
+        docs_L_dev, docs_R_dev, labels_dev = dev_set
 
         # define learning rate weighting for adversarial domain adaption
         p = np.array(range(epochs)) / epochs
@@ -1213,13 +1223,13 @@ class AdHominem():
             # compute accuracy on train set
             acc_tr = self.compute_accuracy(TP, FP, TN, FN)
             # compute accuracy on test set (including PAN 2020 metrics and grid search for threshold)
-            acc_te, scores, th = self.evaluate_model(docs_L_te, docs_R_te, labels_te, batch_size_te)
+            acc_dev, scores, th = self.evaluate_model(docs_L_dev, docs_R_dev, labels_dev, batch_size_dev)
 
             # update "results.txt"-file
             s = 'epoch: ' + str(epoch) \
                 + ', loss: ' + str(round(float(np.mean(loss)), 4)) \
                 + ', acc (tr): ' + str(round(100 * acc_tr, 4)) \
-                + ', acc (te): ' + str(round(100 * acc_te, 4)) \
+                + ', acc (dev): ' + str(round(100 * acc_dev, 4)) \
                 + ', th : ' + str(th)  \
                 + ', ' + str(scores)
             open(file_results, 'a').write(s + '\n')
