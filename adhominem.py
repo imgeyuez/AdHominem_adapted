@@ -1170,7 +1170,9 @@ class AdHominem():
 
         # number of batches for training
         num_batches_tr = ceil(len(labels_tr) / batch_size_tr)
-
+        best_macro_f1 = -1.0
+        best_epoch = -1
+        
         ################
         # start training
         ################
@@ -1247,4 +1249,30 @@ class AdHominem():
                 + ', th : ' + str(th)  \
                 + ', ' + str(scores)
             open(file_results, 'a').write(s + '\n')
+
+            # Save best model based on DEV macro-F1
+            if macro_f1_dev > best_macro_f1:
+
+                best_macro_f1 = macro_f1_dev
+                best_epoch = epoch + 1
+
+                checkpoint_path = os.path.join(checkpoint_dir, "best", "model")
+                self.save_model(checkpoint_path)
+
+                print(
+                    f"New best model! "
+                    f"Epoch: {best_epoch}, "
+                    f"DEV Macro-F1: {best_macro_f1:.4f}"
+                )
+
+        summary = (
+            f"Training finished. "
+            f"Best epoch: {best_epoch}, "
+            f"Best DEV Macro-F1: {best_macro_f1:.4f}"
+        )
+
+        print(summary)
+
+        with open(file_results, "a") as f:
+            f.write(summary + "\n")
 
