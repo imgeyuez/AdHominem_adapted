@@ -1022,9 +1022,22 @@ class AdHominem():
                 pred.extend(curr_pred)
 
         acc = self.compute_accuracy(TP, FP, TN, FN)
+
+        # F1 for label 1 (same author)
+        f1_positive = (
+            2 * TP / (2 * TP + FP + FN)
+            if (2 * TP + FP + FN) > 0 else 0.0)
+
+        # F1 for label 0 (different authors)
+        f1_negative = (
+            2 * TN / (2 * TN + FP + FN)
+            if (2 * TN + FP + FN) > 0 else 0.0)
+
+        macro_f1 = (f1_positive + f1_negative) / 2
+
         scores, th = self.grid_search(np.array(pred), np.array(labels))
 
-        return acc, scores, th
+        return acc, macro_f1, scores, th
 
     ###############################################
     # evaluate model 'AdHominem' for a single batch
@@ -1223,13 +1236,14 @@ class AdHominem():
             # compute accuracy on train set
             acc_tr = self.compute_accuracy(TP, FP, TN, FN)
             # compute accuracy on test set (including PAN 2020 metrics and grid search for threshold)
-            acc_dev, scores, th = self.evaluate_model(docs_L_dev, docs_R_dev, labels_dev, batch_size_dev)
+            acc_dev, macro_f1_dev, scores, th = self.evaluate_model(docs_L_dev, docs_R_dev, labels_dev, batch_size_dev)
 
             # update "results.txt"-file
             s = 'epoch: ' + str(epoch) \
                 + ', loss: ' + str(round(float(np.mean(loss)), 4)) \
                 + ', acc (tr): ' + str(round(100 * acc_tr, 4)) \
                 + ', acc (dev): ' + str(round(100 * acc_dev, 4)) \
+                + ', macro_f1 (dev): ' + str(round(macro_f1_dev, 4)) \
                 + ', th : ' + str(th)  \
                 + ', ' + str(scores)
             open(file_results, 'a').write(s + '\n')
