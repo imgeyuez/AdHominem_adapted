@@ -2,83 +2,224 @@
 from adhominem import AdHominem
 import pickle
 import os
-import argparse
+from datetime import datetime, timedelta
+import time
+import random
+import math
+
 
 
 def main():
 
-    parser = argparse.ArgumentParser(description='AdHominem - Siamese Network for Authorship Verification')
-    parser.add_argument('-D_c', default=10, type=int)  # character embedding dimension
-    parser.add_argument('-D_r', default=30, type=int)  # character representation dimension
-    parser.add_argument('-w', default=4, type=int)  # length of 1D-CNN sliding window
-    parser.add_argument('-D_w', default=300, type=int)  # dimension of word embeddings
-    parser.add_argument('-D_s', default=50, type=int)  # dimension sentence embeddings
-    parser.add_argument('-D_d', default=50, type=int)  # dimension of document embedding
-    parser.add_argument('-D_mlp', default=60, type=int)  # final output dimension
-    parser.add_argument('-T_c', default=15, type=int)  # maximum number of characters per words
-    parser.add_argument('-T_w', default=20, type=int)  # maximum number of words per sentence
-    parser.add_argument('-T_s', default=50, type=int)  # maximum number of sentences per document
-    parser.add_argument('-t_s', default=0.95, type=float)  # boundary for similar pairs (close to one)
-    parser.add_argument('-t_d', default=0.05, type=float)  # boundary for dissimilar pairs (close to zero)
-    parser.add_argument('-epochs', default=100, type=int)  # total number of epochs
-    parser.add_argument('-train_word_embeddings', default=False, type=bool)  # fine-tune pre-trained word embeddings
-    parser.add_argument('-batch_size_tr', default=32, type=int)  # batch size for training
-    parser.add_argument('-batch_size_te', default=128, type=int)  # batch size for evaluation
-    parser.add_argument('-initial_learning_rate', default=0.002, type=float)  # initial learning rate
-    parser.add_argument('-keep_prob_cnn', default=0.9, type=float)  # dropout for 1D-CNN layer
-    parser.add_argument('-keep_prob_lstm', default=0.9, type=float)  # variational dropout for BiLSTM layer
-    parser.add_argument('-keep_prob_att', default=0.9, type=float)  # dropout for attention layer
-    parser.add_argument('-keep_prob_metric', default=0.9, type=float)  # dropout for metric learning layer
-    hyper_parameters = vars(parser.parse_args())
+     # Hyperparameters
+    hyper_parameters = {
+        # Architecture
+        'D_c': 10,                      # character embedding dimension
+        'D_r': 30,                      # character representation dimension
+        'w': 4,                         # length of 1D-CNN sliding window
+        'D_w': 300,                     # dimension of word embeddings
+        'D_s': 50,                      # dimension sentence embeddings
+        'D_d': 50,                      # dimension of document embedding
+        'D_mlp': 60,                    # final output dimension
 
-    # create folder for results
-    dir_results = os.path.join('results')
-    if not os.path.exists(dir_results):
-        os.makedirs(dir_results)
+        # Input dimensions
+        'T_c': 15,                      # maximum number of characters per words
+        'T_w': 20,                      # maximum number of words per sentence
+        'T_s': 50,                      # maximum number of sentences per document
+
+        # Similarity boundaries
+        't_s': 0.95,                    # boundary for similar pairs (close to one)
+        't_d': 0.05,                    # boundary for dissimilar pairs (close to zero)
+
+        # Training
+        'epochs': 50,                   # total number of epochs # default = 100
+        'train_word_embeddings': False, # fine-tune pre-trained word embeddings
+        'batch_size_tr': 32,            # batch size for training # default = 32
+        'batch_size_dev': 32,
+        'initial_learning_rate': 0.002, # initial learning rate
+
+        # Dropout
+        'keep_prob_cnn': 0.9,           # dropout for 1D-CNN layer
+        'keep_prob_lstm': 0.9,          # variational dropout for BiLSTM layer
+        'keep_prob_att': 0.9,           # dropout for attention layer
+        'keep_prob_metric': 0.9,        # dropout for metric learning layer
+    }
+
+
+    # ---------------------------------------
+    # Random Search Configuration
+    # ---------------------------------------
+
+    N_RUNS = 10
+    RANDOM_SEED = 42
+
+    random.seed(RANDOM_SEED)
+
+    search_space = {
+        # 'epochs': [20, 30, 50],
+        'batch_size_tr': [16, 32, 64],
+        # 'batch_size_dev': [32, 64, 128],
+
+        'initial_learning_rate': (0.0001, 0.003),
+
+        'keep_prob_cnn': [0.8, 0.9, 1.0],
+        'keep_prob_lstm': [0.8, 0.9, 1.0],
+        'keep_prob_att': [0.8, 0.9, 1.0],
+        'keep_prob_metric': [0.8, 0.9, 1.0],
+    }
+
+
+    random_search_configs = list()
+
+    for _ in range(N_RUNS):
+        config = hyper_parameters.copy()
+        for param, values in search_space.items():
+            if param == 'initial_learning_rate':
+                low, high = values
+
+                config[param] = math.exp(random.uniform(math.log(low), math.log(high)))
+
+            else:
+                config[param] = random.choice(values)
+                
+        random_search_configs.append(config)
+
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    
+    # Main directory for the entire random search
+    dir_results = os.path.join('results', f'adhominem_random_search_{timestamp}')
+
+    os.makedirs(dir_results, exist_ok=True)
+
+    # # create folder for results
+    # dir_results = os.path.join('results')
+    # if not os.path.exists(dir_results):
+    #     os.makedirs(dir_results)
+
+    # checkpoint_dir = os.path.join(dir_results, f"adhominem_{timestamp}", "checkpoints")
+
+    DATA_PATH = "/home/iyuzu/master_thesis/ad_hominem/AdHominem_adapted/data/VERANDA_files_2026-11-13_15-12-49.pkl"
 
     # load docs, vocabularies and initialized word embeddings
-    with open(os.path.join("data", "data_veranda"), 'rb') as f:
-        docs_L_tr, docs_R_tr, labels_tr, \
-        docs_L_te, docs_R_te, labels_te, \
-        V_w, E_w, V_c = pickle.load(f)
+    with open(DATA_PATH, "rb") as f:
+        (
+            docs_L_tr, docs_R_tr, labels_tr, pair_ids_tr,
+            docs_L_dev, docs_R_dev, labels_dev, pair_ids_dev,
+            docs_L_te, docs_R_te, labels_te, pair_ids_te,
+            V_w, E_w, V_c
+        ) = pickle.load(f)
 
-    # add vocabularies to dictionary
-    hyper_parameters['V_w'] = V_w
-    hyper_parameters['V_c'] = V_c
-    hyper_parameters['N_tr'] = len(labels_tr)
-    hyper_parameters['N_dev'] = len(labels_te)
-
-    # file to store results epoch-wise
-    file_results = os.path.join(dir_results, 'results.txt')
-
-    # delete already existing files
-    if os.path.isfile(file_results):
-        os.remove(file_results)
-
-    # write hyper-parameters setup into file (results.txt)
-    open(file_results, 'a').write('\n'
-                                   + '--------------------------------------------------------------------------------'
-                                   + '\nPARAMETER SETUP:\n'
-                                   + '--------------------------------------------------------------------------------'
-                                   + '\n'
-                                   )
-    for hp in hyper_parameters.keys():
-        if hp in ['V_c', 'V_w']:
-            open(file_results, 'a').write('num ' + hp + ': ' + str(len(hyper_parameters[hp])) + '\n')
-        else:
-            open(file_results, 'a').write(hp + ': ' + str(hyper_parameters[hp]) + '\n')
-
-    # load neural network model
-    adhominem = AdHominem(hyper_parameters=hyper_parameters,
-                          E_w_init=E_w,
-                          )
-    # start training
+    # Prepare datasets (shared across all runs)
     train_set = (docs_L_tr, docs_R_tr, labels_tr)
-    test_set = (docs_L_te, docs_R_te, labels_te)
-    adhominem.train_model(train_set, test_set, file_results)
+    dev_set = (docs_L_dev, docs_R_dev, labels_dev, pair_ids_dev)
 
-    # close session
-    adhominem.sess.close()
+    # ---------------------------------------
+    # Random Search: Train all configurations
+    # ---------------------------------------
+
+    search_start_datetime = datetime.now()
+    search_start_time = time.perf_counter()
+
+    for run_idx, config in enumerate(random_search_configs, start=1):
+        print(f"\n{'=' * 60}")
+        print(f"Starting Random Search Run {run_idx}/{N_RUNS}")
+        print(f"{'=' * 60}")
+
+        run_start_datetime = datetime.now()
+        run_start_time = time.perf_counter()
+
+        # Independent hyperparameters for this run
+        run_hyper_parameters = config.copy()
+
+        # Add vocabularies and dataset sizes
+        run_hyper_parameters['V_w'] = V_w
+        run_hyper_parameters['V_c'] = V_c
+        run_hyper_parameters['N_tr'] = len(labels_tr)
+        run_hyper_parameters['N_dev'] = len(labels_dev)
+
+        # Separate output directory for each run
+        run_dir = os.path.join(dir_results, f"run_{run_idx:02d}")
+
+        os.makedirs(run_dir, exist_ok=True)
+
+        checkpoint_dir = os.path.join(run_dir, "checkpoints")
+        file_results = os.path.join(run_dir, "results.txt")
+
+        # Log hyperparameter configuration
+        with open(file_results, 'w') as f:
+
+            f.write(
+                "--------------------------------------------------\n"
+                "PARAMETER SETUP\n"
+                "--------------------------------------------------\n"
+            )
+
+            for hp, value in run_hyper_parameters.items():
+
+                if hp in ['V_c', 'V_w']:
+                    f.write(f"num {hp}: {len(value)}\n")
+                else:
+                    f.write(f"{hp}: {value}\n")
+
+        # Initialize a fresh model for this run
+        adhominem = AdHominem(
+            hyper_parameters=run_hyper_parameters,
+            E_w_init=E_w
+        )
+
+        try:
+            # Train and select best checkpoint using DEV
+            adhominem.train_model(
+                train_set,
+                dev_set,
+                file_results,
+                checkpoint_dir
+            )
+
+        finally:
+            # Always close TensorFlow session
+            adhominem.sess.close()
+
+        # Calculate run duration
+        run_end_datetime = datetime.now()
+        run_duration_seconds = time.perf_counter() - run_start_time
+
+        run_duration_formatted = str(
+            timedelta(seconds=round(run_duration_seconds))
+        )
+
+        # Log run duration
+        run_summary = (
+            f"\nRun {run_idx}/{N_RUNS} finished.\n"
+            f"Start: {run_start_datetime.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"End: {run_end_datetime.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"Duration: {run_duration_formatted}\n"
+            f"Duration (seconds): {run_duration_seconds:.2f}\n"
+        )
+
+        print(run_summary)
+
+    # ---------------------------------------
+    # Random Search Summary
+    # ---------------------------------------
+
+    search_end_datetime = datetime.now()
+    search_duration_seconds = time.perf_counter() - search_start_time
+
+    search_duration_formatted = str(
+        timedelta(seconds=round(search_duration_seconds))
+    )
+
+    search_summary = (
+        f"\n{'=' * 60}\n"
+        f"RANDOM SEARCH FINISHED\n"
+        f"{'=' * 60}\n"
+        f"Total runs: {N_RUNS}\n"
+        f"Total duration: {search_duration_formatted}\n"
+    )
+
+    with open(os.path.join(dir_results, "random_search_summary.txt"), "w") as f:
+        f.write(search_summary)
 
 
 if __name__ == '__main__':
