@@ -36,7 +36,7 @@ for split, docs_l, docs_r, labels, pair_ids in [
 
     print(f"{split}: {len(labels)} pairs")
     
-with open(os.path.join("data", f"data_veranda_{timestamp}"), 'wb') as f:
+with open(os.path.join("data", f"VERANDA_files_{timestamp}.pkl"), 'wb') as f:
     pickle.dump((
         # TRAIN
         corpus.docs_L_tr,
