@@ -6,6 +6,7 @@ from math import ceil
 from sklearn.utils import shuffle
 from evaluate import evaluate_all
 import os
+import json
 
 
 class AdHominem():
@@ -1037,7 +1038,7 @@ class AdHominem():
 
         scores, th = self.grid_search(np.array(pred), np.array(labels))
 
-        return acc, macro_f1, scores, th
+        return acc, macro_f1, scores, th, TP, FP, TN, FN, np.asarray(pred).reshape(-1)
 
     ###############################################
     # evaluate model 'AdHominem' for a single batch
@@ -1162,7 +1163,7 @@ class AdHominem():
 
         # extract train, dev sets
         docs_L_tr, docs_R_tr, labels_tr = train_set
-        docs_L_dev, docs_R_dev, labels_dev = dev_set
+        docs_L_dev, docs_R_dev, labels_dev, pair_ids_dev = dev_set
 
         # define learning rate weighting for adversarial domain adaption
         p = np.array(range(epochs)) / epochs
@@ -1170,8 +1171,12 @@ class AdHominem():
 
         # number of batches for training
         num_batches_tr = ceil(len(labels_tr) / batch_size_tr)
+
         best_macro_f1 = -1.0
         best_epoch = -1
+        best_confusion_matrix = None
+        it_without_improvement = 0
+
         
         ################
         # start training
@@ -1237,9 +1242,12 @@ class AdHominem():
 
             # compute accuracy on train set
             acc_tr = self.compute_accuracy(TP, FP, TN, FN)
-            # compute accuracy on test set (including PAN 2020 metrics and grid search for threshold)
-            acc_dev, macro_f1_dev, scores, th = self.evaluate_model(docs_L_dev, docs_R_dev, labels_dev, batch_size_dev)
-
+            
+            # compute accuracy on dev set (including PAN 2020 metrics and grid search for threshold)
+            acc_dev, macro_f1_dev, scores, th, TP_dev, FP_dev, TN_dev, FN_dev, pred_dev = self.evaluate_model(
+                docs_L_dev, docs_R_dev, labels_dev, batch_size_dev
+            )
+            
             # update "results.txt"-file
             s = 'epoch: ' + str(epoch) \
                 + ', loss: ' + str(round(float(np.mean(loss)), 4)) \
@@ -1248,6 +1256,13 @@ class AdHominem():
                 + ', macro_f1 (dev): ' + str(round(macro_f1_dev, 4)) \
                 + ', th : ' + str(th)  \
                 + ', ' + str(scores)
+
+            s += (
+                f"\nDEV Confusion Matrix:"
+                f" TP={TP_dev}, FP={FP_dev},"
+                f" TN={TN_dev}, FN={FN_dev}"
+            )
+
             open(file_results, 'a').write(s + '\n')
 
             # Save best model based on DEV macro-F1
@@ -1255,6 +1270,57 @@ class AdHominem():
 
                 best_macro_f1 = macro_f1_dev
                 best_epoch = epoch + 1
+                best_confusion_matrix = {
+                    "TP": int(TP_dev),
+                    "FP": int(FP_dev),
+                    "TN": int(TN_dev),
+                    "FN": int(FN_dev)
+                }
+
+                # Save DEV predictions for the best checkpoint
+                predictions_dev = []
+
+                assert len(pair_ids_dev) == len(labels_dev) == len(pred_dev), (
+                    "Mismatch between DEV pair IDs, labels and predictions!"
+                )
+
+                for pair_id, gold, similarity in zip(
+                    pair_ids_dev, labels_dev, pred_dev
+                ):
+                    gold = int(gold)
+                    similarity = float(similarity)
+
+                    prediction = int(similarity >= 0.5)
+
+                    if gold == 1 and prediction == 1:
+                        outcome = "TP"
+                    elif gold == 0 and prediction == 1:
+                        outcome = "FP"
+                    elif gold == 0 and prediction == 0:
+                        outcome = "TN"
+                    else:
+                        outcome = "FN"
+
+                    predictions_dev.append({
+                        "pair_id": str(pair_id),
+                        "gold_label": gold,
+                        "prediction": prediction,
+                        "similarity_score": similarity,
+                        "outcome": outcome
+                    })
+
+                # checkpoint_dir = run_XX/checkpoints
+                run_dir = os.path.dirname(checkpoint_dir)
+
+                predictions_path = os.path.join(
+                    run_dir,
+                    "predictions_dev.json"
+                )
+
+                with open(predictions_path, "w", encoding="utf-8") as f:
+                    json.dump(predictions_dev, f, indent=4, ensure_ascii=False)
+
+                print(f"Saved {len(predictions_dev)} DEV predictions: {predictions_path}")
 
                 checkpoint_path = os.path.join(checkpoint_dir, "best", "model")
                 self.save_model(checkpoint_path)
@@ -1265,10 +1331,31 @@ class AdHominem():
                     f"DEV Macro-F1: {best_macro_f1:.4f}"
                 )
 
+                it_without_improvement = 0
+
+            else:
+                it_without_improvement += 1
+
+                if it_without_improvement >= 10: # early stopping
+                    message = (
+                        f"Early stopping at epoch {epoch + 1}. "
+                        f"No DEV Macro-F1 improvement for "
+                        f"{it_without_improvement} consecutive epochs."
+                    )
+
+                    print(message)
+
+                    with open(file_results, "a") as f:
+                        f.write(message + "\n")
+
+                    break
+
         summary = (
             f"Training finished. "
             f"Best epoch: {best_epoch}, "
             f"Best DEV Macro-F1: {best_macro_f1:.4f}"
+            f"Best Confustion Matrix: {best_confusion_matrix}"
+            
         )
 
         print(summary)
