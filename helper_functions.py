@@ -94,18 +94,18 @@ class Corpus(object):
     # extract docs
     def extract_docs(self):
         # VERANDA 
-        with open(r"/home/iyuzu/master_thesis/data/train_av_datapairs_2026-09-09_15-03-38.json.json", "r", encoding="UTF-8") as f:
+        with open(r"/home/iyuzu/master_thesis/data/VERANDA_train_av_datapairs_2026-09-24_13-16-54.json", "r", encoding="UTF-8") as f:
         # with open(r"/home/iyuzu/master_thesis/data_PAN/converted/train_final_pairs_2026-09-09_17-45-05.json", "r", encoding="UTF-8") as f:
             train_pairs = json.load(f)
         # VERANDA 
-        with open(r"/home/iyuzu/master_thesis/data/dev_av_datapairs_2026-09-09_15-03-38.json.json", "r", encoding="UTF-8") as f:
+        with open(r"/home/iyuzu/master_thesis/data/VERANDA_dev_av_datapairs_2026-09-24_13-16-54.json", "r", encoding="UTF-8") as f:
         # with open(r"/home/iyuzu/master_thesis/data_PAN/converted/dev_final_pairs_2026-09-09_17-45-05.json", "r", encoding="UTF-8") as f:
             dev_pairs = json.load(f)
 
         # train_pairs = train_pairs + dev_pairs
 
         # VERANDA 
-        with open(r"/home/iyuzu/master_thesis/data/test_av_datapairs_2026-09-09_15-03-38.json.json", "r", encoding="UTF-8") as f:
+        with open(r"/home/iyuzu/master_thesis/data/VERANDA_test_av_datapairs_2026-09-24_13-16-54.json", "r", encoding="UTF-8") as f:
         # PAN 
         # with open(r"/home/iyuzu/master_thesis/data_PAN/converted/test_pairs_2026-09-09_17-45-05.json", "r", encoding="UTF-8") as f:
             test_pairs = json.load(f)
